@@ -1,0 +1,1 @@
+- [Direct Gemini API behavior](gemini-direct-api.md) — account-specific model access and temporary 503s need safe errors and retry, not silent fallback.
