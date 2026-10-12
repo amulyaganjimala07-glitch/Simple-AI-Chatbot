@@ -27,12 +27,47 @@ export interface ChatMessage {
 }
 
 export interface ChatCompletionInput {
+  conversationId: string;
   /**
      * @minItems 1
      * @maxItems 40
      */
   messages: ChatMessage[];
 }
+
+export interface ConversationInput {
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  title: string;
+}
+
+export interface ConversationSummary {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ChatMessageRecordRole = typeof ChatMessageRecordRole[keyof typeof ChatMessageRecordRole];
+
+
+export const ChatMessageRecordRole = {
+  user: 'user',
+  assistant: 'assistant',
+} as const;
+
+export interface ChatMessageRecord {
+  id: string;
+  role: ChatMessageRecordRole;
+  content: string;
+  createdAt: string;
+}
+
+export type ConversationDetail = ConversationSummary & {
+  messages: ChatMessageRecord[];
+};
 
 export interface ApiError {
   error: string;

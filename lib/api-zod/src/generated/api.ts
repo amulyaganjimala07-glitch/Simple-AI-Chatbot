@@ -27,6 +27,7 @@ export const streamChatCompletionBodyMessagesMax = 40;
 
 
 export const StreamChatCompletionBody = zod.object({
+  "conversationId": zod.string().uuid(),
   "messages": zod.array(zod.object({
   "role": zod.enum(['user', 'assistant']),
   "content": zod.string().min(1).max(streamChatCompletionBodyMessagesItemContentMax)
@@ -34,5 +35,68 @@ export const StreamChatCompletionBody = zod.object({
 })
 
 export const StreamChatCompletionResponse = zod.unknown()
+
+
+/**
+ * @summary List this browser's saved conversations
+ */
+export const ListChatConversationsResponseItem = zod.object({
+  "id": zod.string().uuid(),
+  "title": zod.string(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+export const ListChatConversationsResponse = zod.array(ListChatConversationsResponseItem)
+
+
+/**
+ * @summary Create a saved conversation
+ */
+export const createChatConversationBodyTitleMax = 120;
+
+
+
+export const CreateChatConversationBody = zod.object({
+  "title": zod.string().min(1).max(createChatConversationBodyTitleMax)
+})
+
+export const CreateChatConversationResponse = zod.object({
+  "id": zod.string().uuid(),
+  "title": zod.string(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Load a saved conversation
+ */
+export const GetChatConversationParams = zod.object({
+  "conversationId": zod.coerce.string().uuid()
+})
+
+export const GetChatConversationResponse = zod.object({
+  "id": zod.string().uuid(),
+  "title": zod.string(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+}).and(zod.object({
+  "messages": zod.array(zod.object({
+  "id": zod.string().uuid(),
+  "role": zod.enum(['user', 'assistant']),
+  "content": zod.string(),
+  "createdAt": zod.coerce.date()
+}))
+}))
+
+
+/**
+ * @summary Delete a saved conversation
+ */
+export const DeleteChatConversationParams = zod.object({
+  "conversationId": zod.coerce.string().uuid()
+})
+
+export const DeleteChatConversationResponse = zod.void()
 
 

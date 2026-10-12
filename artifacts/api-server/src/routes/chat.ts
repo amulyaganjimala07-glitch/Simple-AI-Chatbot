@@ -1,6 +1,12 @@
 import { GoogleGenAI } from "@google/genai";
 import { StreamChatCompletionBody } from "@workspace/api-zod";
 import { Router, type IRouter } from "express";
+import {
+  CHAT_STORAGE_ERROR,
+  getBrowserOwnerId,
+  getSupabaseAdmin,
+  reportSupabaseError,
+} from "../lib/supabase";
 
 const router: IRouter = Router();
 
@@ -19,7 +25,70 @@ router.post("/chat/completions", async (req, res): Promise<void> => {
     return;
   }
 
+  const supabase = getSupabaseAdmin();
+  if (!supabase) {
+    res.status(503).json({ error: CHAT_STORAGE_ERROR });
+    return;
+  }
+
   try {
+    const ownerId = getBrowserOwnerId(req, res);
+    const { data: conversation, error: conversationError } = await supabase
+      .from("morrow_conversations")
+      .select("id")
+      .eq("id", parsed.data.conversationId)
+      .eq("owner_id", ownerId)
+      .maybeSingle();
+
+    if (conversationError) {
+      reportSupabaseError(req, "verify conversation ownership", conversationError);
+      res.status(503).json({ error: CHAT_STORAGE_ERROR });
+      return;
+    }
+    if (!conversation) {
+      res.status(404).json({ error: "Conversation not found." });
+      return;
+    }
+
+    const { error: saveMessagesError } = await supabase
+      .from("morrow_messages")
+      .upsert(
+        parsed.data.messages.map((message, sequence) => ({
+          conversation_id: conversation.id,
+          sequence,
+          role: message.role,
+          content: message.content,
+        })),
+        { onConflict: "conversation_id,sequence" },
+      );
+    if (saveMessagesError) {
+      reportSupabaseError(req, "save conversation messages", saveMessagesError);
+      res.status(503).json({ error: CHAT_STORAGE_ERROR });
+      return;
+    }
+
+    const { error: removeStaleMessagesError } = await supabase
+      .from("morrow_messages")
+      .delete()
+      .eq("conversation_id", conversation.id)
+      .gte("sequence", parsed.data.messages.length);
+    if (removeStaleMessagesError) {
+      reportSupabaseError(req, "remove stale conversation messages", removeStaleMessagesError);
+      res.status(503).json({ error: CHAT_STORAGE_ERROR });
+      return;
+    }
+
+    const { error: touchConversationError } = await supabase
+      .from("morrow_conversations")
+      .update({ updated_at: new Date().toISOString() })
+      .eq("id", conversation.id)
+      .eq("owner_id", ownerId);
+    if (touchConversationError) {
+      reportSupabaseError(req, "update conversation activity", touchConversationError);
+      res.status(503).json({ error: CHAT_STORAGE_ERROR });
+      return;
+    }
+
     const ai = new GoogleGenAI({ apiKey });
     const stream = await ai.models.generateContentStream({
       model: "gemini-3.8-flash",
@@ -35,15 +104,48 @@ router.post("/chat/completions", async (req, res): Promise<void> => {
     res.setHeader("Connection", "keep-alive");
     res.setHeader("X-Accel-Buffering", "no");
 
+    let assistantContent = "";
     for await (const chunk of stream) {
       if (res.destroyed || res.writableEnded) return;
       const content = chunk.text;
       if (content) {
+        assistantContent += content;
         res.write(`data: ${JSON.stringify({ content })}\n\n`);
       }
     }
 
     if (!res.destroyed && !res.writableEnded) {
+      if (assistantContent) {
+        const { error: saveAssistantError } = await supabase
+          .from("morrow_messages")
+          .upsert(
+            {
+              conversation_id: conversation.id,
+              sequence: parsed.data.messages.length,
+              role: "assistant",
+              content: assistantContent,
+            },
+            { onConflict: "conversation_id,sequence" },
+          );
+        if (saveAssistantError) {
+          reportSupabaseError(req, "save assistant response", saveAssistantError);
+          res.write(
+            `data: ${JSON.stringify({ error: CHAT_STORAGE_ERROR })}\n\n`,
+          );
+          res.end();
+          return;
+        }
+
+        const { error: touchAfterReplyError } = await supabase
+          .from("morrow_conversations")
+          .update({ updated_at: new Date().toISOString() })
+          .eq("id", conversation.id)
+          .eq("owner_id", ownerId);
+        if (touchAfterReplyError) {
+          reportSupabaseError(req, "update conversation after reply", touchAfterReplyError);
+        }
+      }
+
       res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
       res.end();
     }

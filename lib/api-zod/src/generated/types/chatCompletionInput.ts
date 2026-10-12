@@ -8,6 +8,7 @@
 import type { ChatMessage } from './chatMessage';
 
 export interface ChatCompletionInput {
+  conversationId: string;
   /**
      * @minItems 1
      * @maxItems 40
